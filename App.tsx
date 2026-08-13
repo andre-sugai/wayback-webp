@@ -323,10 +323,30 @@ const App: React.FC = () => {
     const handlePaste = (e: ClipboardEvent) => {
        if (activeTab !== 'converter') return;
        
-       if (e.clipboardData && e.clipboardData.files.length > 0) {
-         const pastedFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
-         if (pastedFiles.length > 0) {
-           handleFilesAdded(pastedFiles);
+       if (e.clipboardData) {
+         const pastedFiles: File[] = [];
+         
+         // Extract files from e.clipboardData.files
+         if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+           pastedFiles.push(...Array.from(e.clipboardData.files));
+         } 
+         // Fallback to e.clipboardData.items just in case
+         else if (e.clipboardData.items && e.clipboardData.items.length > 0) {
+           for (let i = 0; i < e.clipboardData.items.length; i++) {
+             const item = e.clipboardData.items[i];
+             if (item.kind === 'file') {
+               const file = item.getAsFile();
+               if (file) pastedFiles.push(file);
+             }
+           }
+         }
+
+         const isImage = (f: File) => f.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|avif|ico)$/i.test(f.name);
+         const imageFiles = pastedFiles.filter(isImage);
+         
+         if (imageFiles.length > 0) {
+           e.preventDefault();
+           handleFilesAdded(imageFiles);
          }
        }
     };
@@ -627,6 +647,7 @@ const App: React.FC = () => {
                   <div className="flex gap-2 p-1 bg-gray-950/80 rounded-lg border border-gray-800 transition-opacity">
                     {[
                       { label: '0.5x', value: 0.5, desc: '50%' },
+                      { label: '0.75x', value: 0.75, desc: '75%' },
                       { label: '1x', value: 1, desc: 'Original' },
                       { label: '2x', value: 2, desc: '200%' },
                       { label: '3x', value: 3, desc: '300%' },

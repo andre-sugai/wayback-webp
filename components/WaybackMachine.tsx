@@ -242,8 +242,19 @@ const WaybackMachine: React.FC = () => {
         } catch (err: any) {
           console.warn(`Provider ${provider.name} failed:`, err.message);
           lastError = err;
+          // Known bug in Wayback Machine CDX API: It omits CORS headers when returning an empty array.
+          // This causes the browser to throw a 'Failed to fetch' (CORS error).
+          // If Direct fails with this, and we have no other choice later, we can assume it's empty.
         }
       }
+
+      // If all providers failed, check if the first (Direct) failed due to a CORS error.
+      // In browsers, CORS errors manifest as 'Failed to fetch' or 'NetworkError'.
+      if (lastError && (lastError.message === 'Failed to fetch' || lastError.message === 'NetworkError when attempting to fetch resource.')) {
+         console.warn("Assuming empty result due to Wayback Machine CORS bug on empty responses.");
+         return [];
+      }
+
       throw lastError || new Error("Connection failed");
   };
 

@@ -39,8 +39,9 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesAdded }) => {
 
   const handleFiles = (fileList: FileList) => {
     const validFiles: File[] = [];
+    const isImage = (f: File) => f.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|avif|ico)$/i.test(f.name);
     Array.from(fileList).forEach((file) => {
-      if (file.type.startsWith('image/')) {
+      if (isImage(file)) {
         validFiles.push(file);
       }
     });
