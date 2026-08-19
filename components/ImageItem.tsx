@@ -111,7 +111,7 @@ const ImageItem: React.FC<ImageItemProps> = ({
       <div 
         className="relative w-full sm:w-28 h-32 sm:h-24 shrink-0 rounded-lg overflow-hidden bg-gray-900 border border-gray-700 group cursor-zoom-in"
         onClick={() => onPreview(item.id)}
-        title="Clique para ampliar"
+        title={item.originalFile.name}
       >
         <img 
           src={item.previewUrl} 
@@ -151,8 +151,11 @@ const ImageItem: React.FC<ImageItemProps> = ({
 
       {/* Info & Inputs */}
       <div className="flex-1 w-full min-w-0 flex flex-col gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2">
           <label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Nome do arquivo</label>
+          <span className="text-xs text-gray-500 truncate max-w-[150px] sm:max-w-[200px]" title={item.originalFile.name}>
+            {item.originalFile.name}
+          </span>
         </div>
         
         <div className="flex items-center gap-2">
