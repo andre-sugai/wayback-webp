@@ -65,6 +65,8 @@ const App: React.FC = () => {
 
   const [outputFormat, setOutputFormat] = useState<'webp' | 'original'>('webp');
   const [resizeScale, setResizeScale] = useState<number>(1);
+  const [resizeMode, setResizeMode] = useState<'preset' | 'custom'>('preset');
+  const [customWidth, setCustomWidth] = useState<number>(1080);
   const [quality, setQuality] = useState<number>(0.8); // 0.1 to 1.0
   const [files, setFiles] = useState<ProcessedImage[]>([]);
   const [isZipping, setIsZipping] = useState(false);
@@ -138,8 +140,9 @@ const App: React.FC = () => {
 
         try {
           let outputBlob: Blob;
+          const targetWidth = resizeMode === 'custom' ? customWidth : null;
           
-          if (outputFormat === 'original' && resizeScale === 1 && quality >= 0.99) {
+          if (outputFormat === 'original' && resizeMode === 'preset' && resizeScale === 1 && quality >= 0.99) {
              // Pass-through optimization: No processing needed if format is original, scale is 1 AND quality is max
              // NOTE: If quality is lower, we allow processing even for original to apply compression
              outputBlob = item.originalFile;
@@ -147,7 +150,7 @@ const App: React.FC = () => {
              await new Promise(r => setTimeout(r, 50));
           } else {
              // Process: Convert to WebP OR Resize/Compress Original using Canvas
-             outputBlob = await processImage(item.originalFile, resizeScale, outputFormat, quality);
+             outputBlob = await processImage(item.originalFile, resizeScale, outputFormat, quality, targetWidth);
           }
           
           // Update success
@@ -173,7 +176,7 @@ const App: React.FC = () => {
     };
 
     processQueue();
-  }, [files, outputFormat, resizeScale, quality]);
+  }, [files, outputFormat, resizeScale, quality, resizeMode, customWidth]);
 
   // Handle Format Toggle
   const handleFormatChange = (newFormat: 'webp' | 'original') => {
@@ -192,7 +195,8 @@ const App: React.FC = () => {
 
   // Handle Resize Toggle
   const handleResizeChange = (scale: number) => {
-    if (scale === resizeScale) return;
+    setResizeMode('preset');
+    if (scale === resizeScale && resizeMode === 'preset') return;
     
     setResizeScale(scale);
     
@@ -203,6 +207,32 @@ const App: React.FC = () => {
       outputBlob: null,
       sizeOutput: 0
     })));
+  };
+
+  // Handle Custom Width Mode
+  const handleCustomWidthSelect = () => {
+    setResizeMode('custom');
+    if (resizeMode === 'custom') return;
+
+    // Re-process all files
+    setFiles(prev => prev.map(f => ({
+      ...f,
+      status: 'pending',
+      outputBlob: null,
+      sizeOutput: 0
+    })));
+  };
+
+  // Commit Custom Width changes to trigger re-processing
+  const handleCustomWidthCommit = () => {
+    if (resizeMode === 'custom' && customWidth > 0) {
+      setFiles(prev => prev.map(f => ({
+        ...f,
+        status: 'pending',
+        outputBlob: null,
+        sizeOutput: 0
+      })));
+    }
   };
 
   // Handle Quality Change
@@ -528,6 +558,8 @@ const App: React.FC = () => {
           hasNext={previewIndex < files.length - 1}
           hasPrev={previewIndex > 0}
           outputFormat={outputFormat}
+          resizeScale={resizeScale}
+          targetWidth={resizeMode === 'custom' ? customWidth : null}
         />
       )}
 
@@ -538,9 +570,14 @@ const App: React.FC = () => {
             <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/30">
               <Zap size={24} className="text-white fill-current" />
             </div>
-            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-300 to-purple-300">
-              WebP Master
-            </h1>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-300 to-purple-300">
+                WebP Master
+              </h1>
+              <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-sm">
+                v1.0.1
+              </span>
+            </div>
           </div>
         </div>
       </header>
@@ -637,15 +674,21 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Resize Settings */}
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className={`flex items-center gap-2 font-semibold mb-2 transition-colors ${outputFormat === 'webp' ? 'text-blue-400' : 'text-emerald-400'}`}>
+                  <div className="flex items-center justify-between h-7 mb-2">
+                    <div className={`flex items-center gap-2 font-semibold transition-colors ${outputFormat === 'webp' ? 'text-blue-400' : 'text-emerald-400'}`}>
                       <Scaling size={20} />
                       <h3>Redimensionar</h3>
                     </div>
+                    {resizeMode === 'custom' && customWidth > 0 && (
+                      <span className={`text-xs font-mono px-2 py-0.5 rounded border ${outputFormat === 'webp' ? 'bg-blue-500/10 text-blue-300 border-blue-500/20' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'}`}>
+                        {customWidth}px largura
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex gap-2 p-1 bg-gray-950/80 rounded-lg border border-gray-800 transition-opacity">
+                  <div className="flex gap-1.5 p-1 bg-gray-950/80 rounded-lg border border-gray-800 h-[58px] items-center">
                     {[
+                      { label: '0.35x', value: 0.35, desc: '35%' },
                       { label: '0.5x', value: 0.5, desc: '50%' },
                       { label: '0.75x', value: 0.75, desc: '75%' },
                       { label: '1x', value: 1, desc: 'Original' },
@@ -655,8 +698,8 @@ const App: React.FC = () => {
                       <button
                         key={opt.value}
                         onClick={() => handleResizeChange(opt.value)}
-                        className={`flex-1 flex flex-col items-center justify-center py-2 px-3 rounded-md text-sm font-medium transition-all
-                          ${resizeScale === opt.value
+                        className={`flex-1 h-full flex flex-col items-center justify-center rounded-md text-sm font-medium transition-all
+                          ${resizeMode === 'preset' && resizeScale === opt.value
                             ? outputFormat === 'webp' 
                               ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
                               : 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
@@ -668,33 +711,125 @@ const App: React.FC = () => {
                         <span className="text-[10px] opacity-70">{opt.desc}</span>
                       </button>
                     ))}
+
+                    {/* Custom Button */}
+                    <button
+                      onClick={handleCustomWidthSelect}
+                      className={`flex-1 h-full min-w-[58px] flex flex-col items-center justify-center rounded-md text-sm font-medium transition-all
+                        ${resizeMode === 'custom'
+                          ? outputFormat === 'webp' 
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                            : 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                          : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+                        }
+                      `}
+                    >
+                      <span>Custom</span>
+                      <span className="text-[10px] opacity-70">Largura</span>
+                    </button>
                   </div>
+
+                  {/* Custom Width Input Box */}
+                  {resizeMode === 'custom' && (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-gray-900/90 border border-gray-700/80 rounded-xl animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-gray-200">Largura em Pixels (px)</span>
+                        <span className="text-[11px] text-gray-400">A altura será ajustada proporcionalmente</span>
+                      </div>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <div className="relative flex-1 sm:w-36">
+                          <input
+                            type="number"
+                            min="10"
+                            max="10000"
+                            step="10"
+                            value={customWidth || ''}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              setCustomWidth(isNaN(val) ? 0 : val);
+                            }}
+                            onBlur={handleCustomWidthCommit}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleCustomWidthCommit();
+                              }
+                            }}
+                            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 pr-9"
+                            placeholder="ex: 1200"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 font-mono pointer-events-none select-none">
+                            px
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleCustomWidthCommit}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all shadow-sm ${
+                            outputFormat === 'webp'
+                              ? 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700'
+                              : 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700'
+                          }`}
+                        >
+                          Aplicar
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Quality Slider */}
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between h-7 mb-2">
                     <div className="flex items-center gap-2 font-semibold text-purple-400">
                       <Gauge size={20} />
                       <h3>Qualidade</h3>
                     </div>
-                    <span className="text-sm font-mono bg-purple-500/10 text-purple-300 px-2 py-0.5 rounded border border-purple-500/20">
-                      {Math.round(quality * 100)}%
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {quality >= 0.99 && (
+                        <span className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                          Máxima
+                        </span>
+                      )}
+                      <span className="text-sm font-mono bg-purple-500/10 text-purple-300 px-2 py-0.5 rounded border border-purple-500/20">
+                        {Math.round(quality * 100)}%
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="h-[52px] flex items-center px-4 bg-gray-950/80 rounded-lg border border-gray-800">
-                    <input 
-                      type="range" 
-                      min="0.1" 
-                      max="1" 
-                      step="0.05"
-                      value={quality}
-                      onChange={handleQualityChange}
-                      onMouseUp={handleQualityCommit}
-                      onTouchEnd={handleQualityCommit}
-                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500 hover:accent-purple-400"
-                    />
+                  <div className="h-[58px] flex flex-col justify-center px-4 bg-gray-950/80 rounded-lg border border-gray-800 gap-1.5">
+                    <div className="relative w-full flex items-center">
+                      <input 
+                        type="range" 
+                        min="0.1" 
+                        max="1" 
+                        step="0.05"
+                        value={quality}
+                        onChange={handleQualityChange}
+                        onMouseUp={handleQualityCommit}
+                        onTouchEnd={handleQualityCommit}
+                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500 hover:accent-purple-400 z-10 relative"
+                      />
+                    </div>
+
+                    {/* Step indicator dots every 5% */}
+                    <div className="relative w-full flex justify-between px-[7px] pointer-events-none select-none">
+                      {Array.from({ length: 19 }, (_, i) => {
+                        const val = 0.1 + i * 0.05;
+                        const isCurrent = Math.abs(quality - val) < 0.01;
+                        const isMajor = Math.round(val * 100) % 25 === 0 || Math.round(val * 100) === 100;
+                        return (
+                          <span 
+                            key={i} 
+                            className={`rounded-full transition-all ${
+                              isCurrent 
+                                ? 'w-1.5 h-1.5 bg-purple-400 shadow-sm shadow-purple-500/50 scale-125' 
+                                : isMajor 
+                                  ? 'w-1 h-1 bg-gray-500' 
+                                  : 'w-1 h-1 bg-gray-700/80'
+                            }`} 
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -860,6 +995,7 @@ const App: React.FC = () => {
                       item={file}
                       outputFormat={outputFormat}
                       resizeScale={resizeScale}
+                      targetWidth={resizeMode === 'custom' ? customWidth : null}
                       onRemove={handleRemove}
                       onRename={handleRename}
                       onPreview={handleOpenPreview}

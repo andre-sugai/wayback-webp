@@ -2,69 +2,116 @@
 /**
  * Processes an image file (Format conversion and/or Resizing) using Canvas.
  */
-export const processImage = (file: File, scale: number = 1, outputFormat: 'webp' | 'original' = 'webp', quality: number = 0.8): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
+export const processImage = async (
+  file: File, 
+  scale: number = 1, 
+  outputFormat: 'webp' | 'original' = 'webp', 
+  quality: number = 0.8,
+  targetWidth?: number | null
+): Promise<Blob> => {
+  // 1. Decode image using createImageBitmap if available for highest fidelity and color accuracy
+  let source: ImageBitmap | HTMLImageElement;
+  let originalWidth = 0;
+  let originalHeight = 0;
+  let objectUrlToRevoke: string | null = null;
+
+  try {
+    if (typeof createImageBitmap === 'function') {
+      // Decode with full color fidelity and without lossy alpha premultiplication
+      source = await createImageBitmap(file, {
+        colorSpaceConversion: 'default',
+        premultiplyAlpha: 'none'
+      });
+      originalWidth = source.width;
+      originalHeight = source.height;
+    } else {
+      throw new Error('createImageBitmap not available');
+    }
+  } catch {
+    // Fallback to HTMLImageElement via object URL
+    source = await new Promise<HTMLImageElement>((resolve, reject) => {
       const img = new Image();
-      img.crossOrigin = "Anonymous"; // Attempt to handle CORS for local/proxy images
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        
-        // Use natural dimensions to ensure we are scaling the real pixel data
-        // img.width can sometimes report CSS width or 0 if not attached to DOM
-        const originalWidth = img.naturalWidth || img.width;
-        const originalHeight = img.naturalHeight || img.height;
-
-        // Calculate scaled dimensions
-        const targetWidth = Math.max(1, Math.floor(originalWidth * scale));
-        const targetHeight = Math.max(1, Math.floor(originalHeight * scale));
-
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Could not get canvas context'));
-          return;
-        }
-
-        // Use better interpolation for downscaling/upscaling if supported
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        
-        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-        
-        // Determine output MIME type
-        let mimeType = 'image/webp';
-        if (outputFormat === 'original') {
-          mimeType = file.type;
-          // Note: Canvas toBlob might default to PNG if the browser doesn't support the specific original mime type (e.g. tiff)
-          // or if it's not a standard web image.
-        }
-
-        try {
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                resolve(blob);
-              } else {
-                reject(new Error('Conversion failed'));
-              }
-            },
-            mimeType,
-            quality
-          );
-        } catch (e) {
-          reject(new Error('Canvas tainted. CORS restricted image.'));
-        }
-      };
+      const url = URL.createObjectURL(file);
+      objectUrlToRevoke = url;
+      img.onload = () => resolve(img);
       img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = event.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
+      img.src = url;
+    });
+    originalWidth = (source as HTMLImageElement).naturalWidth || (source as HTMLImageElement).width;
+    originalHeight = (source as HTMLImageElement).naturalHeight || (source as HTMLImageElement).height;
+  }
+
+  try {
+    // 2. Calculate dimensions
+    let finalWidth: number;
+    let finalHeight: number;
+
+    if (targetWidth && targetWidth > 0 && originalWidth > 0) {
+      finalWidth = Math.max(1, Math.round(targetWidth));
+      const aspectRatio = originalHeight / originalWidth;
+      finalHeight = Math.max(1, Math.round(finalWidth * aspectRatio));
+    } else {
+      finalWidth = Math.max(1, Math.floor(originalWidth * scale));
+      finalHeight = Math.max(1, Math.floor(originalHeight * scale));
+    }
+
+    // 3. Setup Canvas with explicit colorSpace to avoid color shifts
+    const canvas = document.createElement('canvas');
+    canvas.width = finalWidth;
+    canvas.height = finalHeight;
+
+    const ctx = (canvas.getContext('2d', {
+      colorSpace: 'srgb',
+      willReadFrequently: false
+    }) || canvas.getContext('2d')) as CanvasRenderingContext2D | null;
+
+    if (!ctx) {
+      throw new Error('Could not get canvas context');
+    }
+
+    // Only apply interpolation filtering when actual resizing is taking place
+    // Keeping it false for 1:1 ensures pixel-perfect original sharpness
+    const isResizing = finalWidth !== originalWidth || finalHeight !== originalHeight;
+    if (isResizing) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+    } else {
+      ctx.imageSmoothingEnabled = false;
+    }
+
+    ctx.drawImage(source, 0, 0, finalWidth, finalHeight);
+
+    // 4. Output MIME type & Quality encoding
+    let mimeType = 'image/webp';
+    if (outputFormat === 'original') {
+      mimeType = file.type || 'image/png';
+    }
+
+    // Clamp quality between 0.05 and 1.0 (1.0 is highest quality)
+    const exportQuality = quality >= 0.999 ? 1.0 : Math.max(0.05, Math.min(1.0, quality));
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Conversion failed'));
+          }
+        },
+        mimeType,
+        exportQuality
+      );
+    });
+  } finally {
+    // Clean up resources
+    if ('close' in source && typeof source.close === 'function') {
+      source.close();
+    }
+    if (objectUrlToRevoke) {
+      URL.revokeObjectURL(objectUrlToRevoke);
+    }
+  }
 };
 
 /**

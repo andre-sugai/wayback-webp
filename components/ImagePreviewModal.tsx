@@ -12,6 +12,8 @@ interface ImagePreviewModalProps {
   hasNext: boolean;
   hasPrev: boolean;
   outputFormat: 'webp' | 'original';
+  resizeScale?: number;
+  targetWidth?: number | null;
 }
 
 const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
@@ -22,7 +24,9 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   onPrev,
   hasNext,
   hasPrev,
-  outputFormat
+  outputFormat,
+  resizeScale = 1,
+  targetWidth
 }) => {
   const [processedUrl, setProcessedUrl] = useState<string | null>(null);
   const [sliderPosition, setSliderPosition] = useState(50);
@@ -112,6 +116,21 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   const showComparison = processedUrl && item.status === 'done';
   const fileExtension = outputFormat === 'webp' ? 'webp' : item.originalExtension;
 
+  // Calculate scaled dimensions
+  let finalWidth = item.width;
+  let finalHeight = item.height;
+  let isResized = false;
+
+  if (targetWidth && targetWidth > 0 && item.width > 0) {
+    finalWidth = Math.max(1, Math.round(targetWidth));
+    finalHeight = Math.max(1, Math.round(finalWidth * (item.height / item.width)));
+    isResized = finalWidth !== item.width || finalHeight !== item.height;
+  } else if (resizeScale && resizeScale !== 1 && item.width > 0) {
+    finalWidth = Math.max(1, Math.floor(item.width * resizeScale));
+    finalHeight = Math.max(1, Math.floor(item.height * resizeScale));
+    isResized = true;
+  }
+
   return (
     <div 
       className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200"
@@ -175,14 +194,8 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
             className="relative max-w-full max-h-[85vh] select-none shadow-2xl overflow-hidden rounded-lg group cursor-col-resize"
             onMouseDown={handleMouseDown}
             onTouchStart={handleMouseDown}
-            // Add a mouse move listener here for immediate feedback without clicking (hover effect style)
-            // or stick to drag only. Drag is better for precision.
           >
             {/* 1. Base Image (Original) - Determines Container Size */}
-            {/* Note: We use the original as the base because resizing might change dimensions, 
-                but usually we want to compare against the source layout. 
-                If resizing changed aspect ratio, this simple overlay wouldn't work, 
-                but our resizer keeps aspect ratio. */}
             <img
               src={item.previewUrl}
               alt="Original"
@@ -202,19 +215,44 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                 draggable={false}
               />
               {/* Processed Label */}
-              <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur-md text-emerald-400 text-xs font-bold px-3 py-1.5 rounded border border-emerald-500/30 flex flex-col items-end">
-                <span>DEPOIS</span>
-                <span className="text-gray-300 font-mono font-normal">{formatBytes(item.sizeOutput)}</span>
+              <div className="absolute bottom-4 right-4 bg-black/80 backdrop-blur-md text-emerald-400 text-xs font-bold px-3 py-2 rounded-lg border border-emerald-500/30 flex flex-col items-end gap-0.5 shadow-lg">
+                <div className="flex items-center gap-1.5">
+                  <span>DEPOIS</span>
+                  <span className="text-[10px] font-mono uppercase bg-emerald-500/20 text-emerald-300 px-1 rounded">
+                    {fileExtension}
+                  </span>
+                </div>
+                <span className="text-gray-200 font-mono font-medium">{formatBytes(item.sizeOutput)}</span>
+                {item.width > 0 && (
+                  <span className="text-[11px] text-gray-400 font-mono">
+                    {finalWidth}x{finalHeight} px {isResized && `(${Math.round((finalWidth / item.width) * 100)}%)`}
+                  </span>
+                )}
+                {isResized && (
+                  <span className="text-[10px] text-amber-300/90 font-sans font-normal mt-0.5">
+                    ⚠️ Redimensionado (Visualização ampliada)
+                  </span>
+                )}
               </div>
             </div>
 
             {/* 3. Original Label (Visible on the left side) */}
             <div 
-              className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md text-indigo-400 text-xs font-bold px-3 py-1.5 rounded border border-indigo-500/30 flex flex-col items-start transition-opacity"
+              className="absolute bottom-4 left-4 bg-black/80 backdrop-blur-md text-indigo-400 text-xs font-bold px-3 py-2 rounded-lg border border-indigo-500/30 flex flex-col items-start gap-0.5 shadow-lg transition-opacity"
               style={{ opacity: sliderPosition > 10 ? 1 : 0 }} // Hide if slider covers it
             >
-               <span>ANTES</span>
-               <span className="text-gray-300 font-mono font-normal">{formatBytes(item.sizeOriginal)}</span>
+               <div className="flex items-center gap-1.5">
+                 <span>ANTES</span>
+                 {item.originalExtension && (
+                   <span className="text-[10px] font-mono uppercase bg-indigo-500/20 text-indigo-300 px-1 rounded">
+                     {item.originalExtension}
+                   </span>
+                 )}
+               </div>
+               <span className="text-gray-200 font-mono font-medium">{formatBytes(item.sizeOriginal)}</span>
+               {item.width > 0 && (
+                 <span className="text-[11px] text-gray-400 font-mono">{item.width}x{item.height} px (100%)</span>
+               )}
             </div>
 
             {/* 4. Slider Handle Line */}

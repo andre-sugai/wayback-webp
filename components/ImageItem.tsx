@@ -7,6 +7,7 @@ interface ImageItemProps {
   item: ProcessedImage;
   outputFormat: 'webp' | 'original';
   resizeScale?: number;
+  targetWidth?: number | null;
   onRemove: (id: string) => void;
   onRename: (id: string, newName: string) => void;
   onPreview: (id: string) => void;
@@ -24,6 +25,7 @@ const ImageItem: React.FC<ImageItemProps> = ({
   item, 
   outputFormat, 
   resizeScale = 1,
+  targetWidth,
   onRemove, 
   onRename,
   onPreview,
@@ -67,11 +69,19 @@ const ImageItem: React.FC<ImageItemProps> = ({
   };
 
   // Calculate final dimensions
-  const finalWidth = Math.max(1, Math.floor(item.width * resizeScale));
-  const finalHeight = Math.max(1, Math.floor(item.height * resizeScale));
-  
-  // Show scaling arrow if scale is not 1, regardless of format
-  const hasScaling = resizeScale !== 1;
+  let finalWidth: number;
+  let finalHeight: number;
+  let hasScaling = false;
+
+  if (targetWidth && targetWidth > 0 && item.width > 0) {
+    finalWidth = Math.max(1, Math.round(targetWidth));
+    finalHeight = Math.max(1, Math.round(finalWidth * (item.height / item.width)));
+    hasScaling = finalWidth !== item.width || finalHeight !== item.height;
+  } else {
+    finalWidth = Math.max(1, Math.floor(item.width * resizeScale));
+    finalHeight = Math.max(1, Math.floor(item.height * resizeScale));
+    hasScaling = resizeScale !== 1;
+  }
 
   return (
     <div className={`relative flex flex-col sm:flex-row items-center gap-4 p-4 rounded-xl border ${getStatusColor()} transition-all duration-200 select-none`}>
