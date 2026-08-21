@@ -3,7 +3,8 @@ import JSZip from 'jszip';
 import saveAs from 'file-saver';
 import { 
   Trash2, Download, Zap, Images, Settings2, 
-  Type, Hash, MonitorPlay, Loader2, ArrowUp, History, Scaling, Gauge 
+  Type, Hash, MonitorPlay, Loader2, ArrowUp, History, Scaling, Gauge,
+  ArrowUpDown, ArrowDownNarrowWide, ArrowDownWideNarrow, ArrowDownAZ, ArrowUpAZ, ChevronDown
 } from 'lucide-react';
 import {
   DndContext, 
@@ -84,6 +85,7 @@ const App: React.FC = () => {
   // Bulk Rename State
   const [bulkName, setBulkName] = useState('');
   const [withNumbering, setWithNumbering] = useState(true);
+  const [prefixOrder, setPrefixOrder] = useState(true);
 
   // Dnd Sensors - Switched to PointerSensor for better unified support
   const sensors = useSensors(
@@ -97,14 +99,18 @@ const App: React.FC = () => {
     })
   );
 
-  // Helper to apply naming pattern to a specific list
+  // Helper to apply naming pattern with leading zeros (01, 02... 10) so file managers sort in exact order
   const applyNamingPattern = useCallback((currentFiles: ProcessedImage[], baseName: string, numbering: boolean): ProcessedImage[] => {
     if (!baseName) return currentFiles;
+    const padLength = Math.max(2, String(currentFiles.length).length);
 
-    return currentFiles.map((file, index) => ({
-      ...file,
-      name: numbering ? `${baseName}${index + 1}` : baseName
-    }));
+    return currentFiles.map((file, index) => {
+      const numStr = numbering ? String(index + 1).padStart(padLength, '0') : '';
+      return {
+        ...file,
+        name: numbering ? `${baseName}${numStr}` : baseName
+      };
+    });
   }, []);
 
   // Effect: Scroll Listener for Back To Top
@@ -449,6 +455,64 @@ const App: React.FC = () => {
     setFiles(prev => prev.map(f => f.id === id ? { ...f, name: newName } : f));
   };
 
+  // Sorting State & Handlers
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target as Node)) {
+        setShowSortMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSort = (type: 'size-asc' | 'size-desc' | 'reverse' | 'name-asc' | 'name-desc') => {
+    setShowSortMenu(false);
+    setFiles(prev => {
+      let sorted = [...prev];
+      switch (type) {
+        case 'size-asc':
+          sorted.sort((a, b) => (a.sizeOriginal || 0) - (b.sizeOriginal || 0));
+          break;
+        case 'size-desc':
+          sorted.sort((a, b) => (b.sizeOriginal || 0) - (a.sizeOriginal || 0));
+          break;
+        case 'reverse':
+          sorted.reverse();
+          break;
+        case 'name-asc':
+          sorted.sort((a, b) => a.originalFile.name.localeCompare(b.originalFile.name, undefined, { numeric: true, sensitivity: 'base' }));
+          break;
+        case 'name-desc':
+          sorted.sort((a, b) => b.originalFile.name.localeCompare(a.originalFile.name, undefined, { numeric: true, sensitivity: 'base' }));
+          break;
+      }
+      if (bulkName) {
+        return applyNamingPattern(sorted, bulkName, withNumbering);
+      }
+      return sorted;
+    });
+  };
+
+  const handleMoveToPosition = (id: string, targetPos: number) => {
+    setFiles(prev => {
+      const fromIndex = prev.findIndex(f => f.id === id);
+      if (fromIndex === -1) return prev;
+
+      const toIndex = Math.max(0, Math.min(prev.length - 1, targetPos - 1));
+      if (fromIndex === toIndex) return prev;
+
+      const newFiles = arrayMove(prev, fromIndex, toIndex);
+      if (bulkName) {
+        return applyNamingPattern(newFiles, bulkName, withNumbering);
+      }
+      return newFiles;
+    });
+  };
+
   // Preview Handlers
   const handleOpenPreview = (id: string) => {
     const index = files.findIndex(f => f.id === id);
@@ -487,10 +551,21 @@ const App: React.FC = () => {
     try {
       const zip = new JSZip();
       const nameCounts: Record<string, number> = {};
+      const padLength = Math.max(2, String(finishedFiles.length).length);
+      const baseTime = Date.now() - (finishedFiles.length * 2000);
 
-      finishedFiles.forEach(item => {
+      finishedFiles.forEach((item, index) => {
         let fileName = item.name;
         
+        // If prefixOrder is enabled and no custom bulkName is active, prefix with 01_, 02_...
+        // so operating systems (Windows Explorer / macOS Finder) sort them in the exact list order
+        if (prefixOrder && !bulkName) {
+          const prefix = String(index + 1).padStart(padLength, '0');
+          if (!fileName.startsWith(`${prefix}_`) && !fileName.startsWith(`${prefix}-`)) {
+            fileName = `${prefix}_${fileName}`;
+          }
+        }
+
         if (nameCounts[fileName]) {
           nameCounts[fileName]++;
           fileName = `${fileName} (${nameCounts[fileName]})`;
@@ -502,7 +577,10 @@ const App: React.FC = () => {
         const finalName = extension ? `${fileName}.${extension}` : fileName;
 
         if (item.outputBlob) {
-          zip.file(finalName, item.outputBlob);
+          // Add sequential timestamp so file managers sorting by Date also preserve order
+          zip.file(finalName, item.outputBlob, {
+            date: new Date(baseTime + index * 1000)
+          });
         }
       });
 
@@ -575,7 +653,7 @@ const App: React.FC = () => {
                 WebP Master
               </h1>
               <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-sm">
-                v1.0.1
+                v1.1.0
               </span>
             </div>
           </div>
@@ -853,24 +931,44 @@ const App: React.FC = () => {
                       className="w-full bg-gray-950/80 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-all"
                     />
                     
-                    <div className="flex items-center justify-between">
-                      <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
-                          <div className="relative flex items-center">
-                            <input 
-                              type="checkbox" 
-                              checked={withNumbering}
-                              onChange={(e) => handleNumberingToggle(e.target.checked)}
-                              className="peer sr-only"
-                            />
-                            <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-                          </div>
-                          <span className="flex items-center gap-1">
-                            <Hash size={14} /> Numeração automática
-                          </span>
-                      </label>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-5">
+                        <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                            <div className="relative flex items-center">
+                              <input 
+                                type="checkbox" 
+                                checked={withNumbering}
+                                onChange={(e) => handleNumberingToggle(e.target.checked)}
+                                className="peer sr-only"
+                              />
+                              <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                            </div>
+                            <span className="flex items-center gap-1">
+                              <Hash size={14} /> Numeração sequencial (01, 02...)
+                            </span>
+                        </label>
+
+                        {!bulkName && (
+                          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                              <div className="relative flex items-center">
+                                <input 
+                                  type="checkbox" 
+                                  checked={prefixOrder}
+                                  onChange={(e) => setPrefixOrder(e.target.checked)}
+                                  className="peer sr-only"
+                                />
+                                <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                              </div>
+                              <span className="flex items-center gap-1">
+                                Prefixar ordem no ZIP (01_, 02_...)
+                              </span>
+                          </label>
+                        )}
+                      </div>
+
                       {bulkName && (
                         <span className="text-xs text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">
-                          {bulkName}{withNumbering ? '1' : ''}.{outputFormat === 'webp' ? 'webp' : 'ext'}
+                          Ex: {bulkName}{withNumbering ? '01' : ''}.{outputFormat === 'webp' ? 'webp' : 'ext'}
                         </span>
                       )}
                     </div>
@@ -978,36 +1076,131 @@ const App: React.FC = () => {
             )}
 
             {/* Sortable List Section */}
-            <DndContext 
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext 
-                items={files.map(f => f.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="grid grid-cols-1 gap-3">
-                  {files.map((file, index) => (
-                    <SortableImageItem
-                      key={file.id}
-                      id={file.id}
-                      item={file}
-                      outputFormat={outputFormat}
-                      resizeScale={resizeScale}
-                      targetWidth={resizeMode === 'custom' ? customWidth : null}
-                      onRemove={handleRemove}
-                      onRename={handleRename}
-                      onPreview={handleOpenPreview}
-                      onMoveUp={() => handleMoveUp(file.id)}
-                      onMoveDown={() => handleMoveDown(file.id)}
-                      isFirst={index === 0}
-                      isLast={index === files.length - 1}
-                    />
-                  ))}
+            <div className="space-y-3">
+              {/* List Header with Count & Sort Controls */}
+              <div className="flex items-center justify-between px-1 text-xs text-gray-400">
+                <span className="font-semibold uppercase tracking-wider text-gray-500">
+                  Fila de Imagens ({files.length})
+                </span>
+
+                {/* Sort Dropdown Menu */}
+                <div className="relative" ref={sortMenuRef}>
+                  <button
+                    onClick={() => setShowSortMenu(!showSortMenu)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900/90 hover:bg-gray-800 border border-gray-700/80 hover:border-gray-600 text-gray-300 hover:text-white transition-all text-xs font-medium shadow-sm active:scale-95"
+                    title="Organizar ordem das imagens"
+                  >
+                    <ArrowUpDown size={14} className="text-indigo-400" />
+                    <span>Organizar</span>
+                    <ChevronDown size={12} className={`transition-transform duration-200 text-gray-400 ${showSortMenu ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showSortMenu && (
+                    <div className="absolute right-0 mt-2 w-64 bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl backdrop-blur-xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-800 flex items-center justify-between">
+                        <span>Organizar Fila</span>
+                        <span className="text-indigo-400 font-normal lowercase">ordem</span>
+                      </div>
+                      
+                      <div className="py-1 space-y-0.5">
+                        <button
+                          onClick={() => handleSort('size-asc')}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-gray-200 hover:bg-indigo-600/20 hover:text-indigo-300 transition-colors text-left"
+                        >
+                          <ArrowDownNarrowWide size={15} className="text-indigo-400 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Tamanho: Menor → Maior</span>
+                            <span className="text-[10px] text-gray-400">Das mais leves para as mais pesadas</span>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => handleSort('size-desc')}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-gray-200 hover:bg-indigo-600/20 hover:text-indigo-300 transition-colors text-left"
+                        >
+                          <ArrowDownWideNarrow size={15} className="text-indigo-400 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Tamanho: Maior → Menor</span>
+                            <span className="text-[10px] text-gray-400">Das mais pesadas para as mais leves</span>
+                          </div>
+                        </button>
+
+                        <div className="my-1 border-t border-gray-800/80" />
+
+                        <button
+                          onClick={() => handleSort('reverse')}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-gray-200 hover:bg-purple-600/20 hover:text-purple-300 transition-colors text-left"
+                        >
+                          <ArrowUpDown size={15} className="text-purple-400 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Inverter Ordem</span>
+                            <span className="text-[10px] text-gray-400">Enviadas por último primeiro</span>
+                          </div>
+                        </button>
+
+                        <div className="my-1 border-t border-gray-800/80" />
+
+                        <button
+                          onClick={() => handleSort('name-asc')}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-gray-200 hover:bg-emerald-600/20 hover:text-emerald-300 transition-colors text-left"
+                        >
+                          <ArrowDownAZ size={15} className="text-emerald-400 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Nome: A → Z (1 → 9)</span>
+                            <span className="text-[10px] text-gray-400">Ordem alfabética e numérica</span>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => handleSort('name-desc')}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-gray-200 hover:bg-emerald-600/20 hover:text-emerald-300 transition-colors text-left"
+                        >
+                          <ArrowUpAZ size={15} className="text-emerald-400 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Nome: Z → A (9 → 1)</span>
+                            <span className="text-[10px] text-gray-400">Ordem inversa por nome</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </SortableContext>
-            </DndContext>
+              </div>
+
+              <DndContext 
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext 
+                  items={files.map(f => f.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="grid grid-cols-1 gap-3">
+                    {files.map((file, index) => (
+                      <SortableImageItem
+                        key={file.id}
+                        id={file.id}
+                        item={file}
+                        index={index}
+                        totalCount={files.length}
+                        outputFormat={outputFormat}
+                        resizeScale={resizeScale}
+                        targetWidth={resizeMode === 'custom' ? customWidth : null}
+                        onRemove={handleRemove}
+                        onRename={handleRename}
+                        onMoveToPosition={handleMoveToPosition}
+                        onPreview={handleOpenPreview}
+                        onMoveUp={() => handleMoveUp(file.id)}
+                        onMoveDown={() => handleMoveDown(file.id)}
+                        isFirst={index === 0}
+                        isLast={index === files.length - 1}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
           </div>
         ) : (
           <div className="max-w-4xl mx-auto">

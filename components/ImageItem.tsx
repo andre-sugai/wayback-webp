@@ -1,15 +1,18 @@
-import React from 'react';
-import { X, Download, FileImage, Loader2, CheckCircle, AlertCircle, GripVertical, MoveRight, Ruler, ChevronUp, ChevronDown, ZoomIn } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Download, FileImage, Loader2, CheckCircle, AlertCircle, GripVertical, MoveRight, Ruler, ChevronUp, ChevronDown, ZoomIn, Hash } from 'lucide-react';
 import { ProcessedImage } from '../types';
 import { formatBytes, downloadBlob } from '../utils/imageUtils';
 
 interface ImageItemProps {
   item: ProcessedImage;
+  index: number;
+  totalCount: number;
   outputFormat: 'webp' | 'original';
   resizeScale?: number;
   targetWidth?: number | null;
   onRemove: (id: string) => void;
   onRename: (id: string, newName: string) => void;
+  onMoveToPosition: (id: string, targetPos: number) => void;
   onPreview: (id: string) => void;
   // Dnd Kit props passed down
   dragHandleProps?: any;
@@ -23,11 +26,14 @@ interface ImageItemProps {
 
 const ImageItem: React.FC<ImageItemProps> = ({ 
   item, 
+  index,
+  totalCount,
   outputFormat, 
   resizeScale = 1,
   targetWidth,
   onRemove, 
   onRename,
+  onMoveToPosition,
   onPreview,
   dragHandleProps,
   isDragging,
@@ -37,6 +43,20 @@ const ImageItem: React.FC<ImageItemProps> = ({
   isLast
 }) => {
   const fileExtension = outputFormat === 'webp' ? 'webp' : item.originalExtension;
+  const [posInput, setPosInput] = useState(String(index + 1));
+
+  useEffect(() => {
+    setPosInput(String(index + 1));
+  }, [index]);
+
+  const handleCommitPosition = () => {
+    const val = parseInt(posInput, 10);
+    if (!isNaN(val) && val >= 1 && val <= totalCount && val !== index + 1) {
+      onMoveToPosition(item.id, val);
+    } else {
+      setPosInput(String(index + 1));
+    }
+  };
 
   const handleDownload = () => {
     if (item.outputBlob) {
@@ -86,8 +106,8 @@ const ImageItem: React.FC<ImageItemProps> = ({
   return (
     <div className={`relative flex flex-col sm:flex-row items-center gap-4 p-4 rounded-xl border ${getStatusColor()} transition-all duration-200 select-none`}>
       
-      {/* Control Column: Manual Order + Grip */}
-      <div className="hidden sm:flex flex-col items-center justify-center gap-0.5 pr-2 border-r border-gray-800 mr-2">
+      {/* Control Column: Manual Order + Number Input + Grip */}
+      <div className="hidden sm:flex flex-col items-center justify-center gap-1 pr-2 border-r border-gray-800 mr-2">
          <button 
            onClick={onMoveUp} 
            disabled={isFirst} 
@@ -96,15 +116,34 @@ const ImageItem: React.FC<ImageItemProps> = ({
          >
             <ChevronUp size={16} />
          </button>
+
+         {/* Editable Position Input */}
+         <div className="relative my-0.5 group">
+           <input
+             type="text"
+             inputMode="numeric"
+             value={posInput}
+             onChange={(e) => setPosInput(e.target.value)}
+             onBlur={handleCommitPosition}
+             onKeyDown={(e) => {
+               if (e.key === 'Enter') {
+                 handleCommitPosition();
+                 (e.target as HTMLInputElement).blur();
+               }
+             }}
+             className="w-8 h-7 bg-gray-900 border border-gray-700/80 group-hover:border-indigo-500/60 rounded-md text-center text-xs font-mono font-bold text-indigo-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner"
+             title={`Posição atual: ${index + 1} de ${totalCount}. Digite um novo número e pressione Enter para mover.`}
+           />
+         </div>
          
          {/* Original Side Grip */}
          <div 
             {...dragHandleProps}
             style={{ touchAction: 'none' }}
-            className="cursor-grab active:cursor-grabbing p-1 text-gray-600 hover:text-gray-300 transition-colors"
+            className="cursor-grab active:cursor-grabbing p-0.5 text-gray-600 hover:text-gray-300 transition-colors"
             title="Arraste para reordenar"
          >
-            <GripVertical size={20} />
+            <GripVertical size={16} />
          </div>
 
          <button 
@@ -162,7 +201,12 @@ const ImageItem: React.FC<ImageItemProps> = ({
       {/* Info & Inputs */}
       <div className="flex-1 w-full min-w-0 flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Nome do arquivo</label>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-sm" title={`Posição #${index + 1} na fila`}>
+              #{index + 1}
+            </span>
+            <label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Nome do arquivo</label>
+          </div>
           <span className="text-xs text-gray-500 truncate max-w-[150px] sm:max-w-[200px]" title={item.originalFile.name}>
             {item.originalFile.name}
           </span>
